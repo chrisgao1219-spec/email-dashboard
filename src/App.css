@@ -3849,6 +3849,7 @@ body {
 .link-empty { background: #fef2f2; color: #dc2626; }
 .link-test { background: #fee2e2; color: #b91c1c; }
 .link-mismatch { background: #fef2f2; color: #dc2626; }
+.link-relative { background: #fff7ed; color: #c2410c; }
 .link-invalid { background: #f1f5f9; color: #64748b; }
 .html-audit-verdict {
   display: flex;
