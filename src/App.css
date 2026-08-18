@@ -3781,88 +3781,110 @@ body {
 }
 
 /* ========================================
-   Gmail 测试邮件
+   邮件 HTML 审核
    ======================================== */
-.gmail-card {
-  border-left: 4px solid #10b981;
+.html-audit-card {
+  border-left: 4px solid #f59e0b;
 }
-.gmail-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.gmail-error {
-  margin-top: 10px;
-  padding: 10px 14px;
-  background: #fef2f2;
-  border: 1px solid #fecaca;
-  border-radius: var(--radius-xs);
-  font-size: 13px;
-  color: #b91c1c;
-}
-.gmail-email-info {
-  padding: 14px;
-  background: #fafbff;
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-sm);
-}
-.gmail-email-row {
-  font-size: 13px;
-  line-height: 1.7;
-  color: var(--text);
-  margin-bottom: 2px;
-}
-.gmail-email-row strong {
-  color: var(--text-secondary);
-  font-weight: 600;
-}
-.gmail-report-summary {
-  padding: 10px 14px;
-  margin-bottom: 12px;
-  background: #f0fdf4;
-  border: 1px solid #bbf7d0;
-  border-radius: var(--radius-xs);
-  font-size: 13px;
-  color: #166534;
-  line-height: 1.6;
-}
-.gmail-report-grid {
+.html-audit-meta {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 12px;
+  gap: 10px;
+  margin-bottom: 10px;
 }
-.gmail-report-section {
-  padding: 14px;
-  background: #fafbfc;
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-sm);
-}
-.gmail-report-head {
+.html-audit-actions {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin-bottom: 8px;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 4px;
 }
-.gmail-report-head strong { font-size: 14px; }
-.gmail-report-score {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--primary);
+.html-audit-preview {
+  margin-top: 14px;
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
 }
-.gmail-report-list {
-  list-style: none;
+.html-audit-preview-bar {
+  background: #e5e7eb;
+  padding: 6px 10px;
+  font-size: 11px;
+  color: #6b7280;
   display: flex;
-  flex-direction: column;
+  align-items: center;
   gap: 6px;
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--text-secondary);
 }
-.gmail-report-strengths li { color: #166534; }
-.gmail-report-suggestions li { color: #b45309; }
+.link-list {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.link-list th, .link-list td {
+  text-align: left;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border-light);
+  vertical-align: top;
+}
+.link-list th {
+  color: var(--text-secondary);
+  font-weight: 600;
+  background: #fafbfc;
+}
+.link-href {
+  word-break: break-all;
+  color: var(--text-secondary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
+.link-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.link-ok { background: #ecfdf5; color: #059669; }
+.link-hash { background: #fef3c7; color: #b45309; }
+.link-empty { background: #fef2f2; color: #dc2626; }
+.link-test { background: #fee2e2; color: #b91c1c; }
+.link-mismatch { background: #fef2f2; color: #dc2626; }
+.link-invalid { background: #f1f5f9; color: #64748b; }
+.html-audit-verdict {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: var(--radius-sm);
+  margin-top: 12px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.html-audit-verdict .verdict-icon { font-size: 24px; }
+.verdict-yes { background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46; }
+.verdict-caution { background: #fffbeb; border: 1px solid #fde68a; color: #92400e; }
+.verdict-no { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
+.link-variable { background: #ede9fe; color: #6d28d9; }
+.html-audit-dropzone {
+  border: 2px dashed var(--border);
+  border-radius: 10px;
+  padding: 26px 16px;
+  text-align: center;
+  cursor: pointer;
+  background: #fafbfc;
+  transition: border-color .2s, background .2s;
+  margin-bottom: 12px;
+}
+.html-audit-dropzone:hover, .html-audit-dropzone.drag-over {
+  border-color: var(--primary);
+  background: #f5f7ff;
+}
+.dropzone-icon { font-size: 28px; }
+.dropzone-text { font-size: 14px; font-weight: 600; margin-top: 6px; }
+.dropzone-hint { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
 
 @media (max-width: 768px) {
-  .gmail-report-grid { grid-template-columns: 1fr; }
+  .html-audit-meta { grid-template-columns: 1fr; }
 }
 
 /* ========================================

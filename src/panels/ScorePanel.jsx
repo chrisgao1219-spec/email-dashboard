@@ -1,6 +1,7 @@
-import { useState, useCallback, useMemo, useEffect } from 'react';
-import { fetchScore, fetchGmailStatus, fetchGmailRead, fetchGmailAnalyze, getGmailAuthUrl } from '../api';
+import { useState, useCallback, useMemo } from 'react';
+import { fetchScore } from '../api';
 import EmailPreview from '../components/EmailPreview';
+import HtmlAudit from '../components/HtmlAudit';
 
 const MOBILE_CUTOFF = 33;
 const TRIGGER_PATTERNS = [
@@ -111,13 +112,6 @@ export default function ScorePanel({ brand }) {
   const [error, setError] = useState(null);
   const [labVariants, setLabVariants] = useState(null);
 
-  // Gmail 测试邮箱功能
-  const [gmailConnected, setGmailConnected] = useState(false);
-  const [gmailLoading, setGmailLoading] = useState(false);
-  const [gmailEmail, setGmailEmail] = useState(null);
-  const [gmailReport, setGmailReport] = useState(null);
-  const [gmailError, setGmailError] = useState(null);
-
   const subjectLab = useMemo(() => subject.trim() ? analyzeSubjectLine(subject) : null, [subject]);
   const inboxPreview = useMemo(() => body.trim() ? simulateAIInbox(body, subject, preheader) : null, [body, subject, preheader]);
 
@@ -153,140 +147,9 @@ export default function ScorePanel({ brand }) {
     setLoading(false);
   }, [subject, body, brand, preheader]);
 
-  // ── Gmail 测试邮箱逻辑 ──
-  useEffect(() => {
-    fetchGmailStatus().then(r => setGmailConnected(r.connected)).catch(() => {});
-    if (typeof window !== 'undefined' && window.location.search.includes('gmail=connected')) {
-      setGmailConnected(true);
-    }
-  }, []);
-
-  const handleConnectGmail = () => {
-    window.location.href = getGmailAuthUrl();
-  };
-
-  const handleReadGmail = async () => {
-    setGmailLoading(true); setGmailError(null); setGmailEmail(null); setGmailReport(null);
-    try {
-      const r = await fetchGmailRead();
-      if (r.found && r.email) {
-        setGmailEmail(r.email);
-        setSubject(r.email.subject || '');
-        setBody(r.email.plainBody || r.email.htmlBody || '');
-      } else if (r.message) {
-        setGmailError(r.message);
-      }
-    } catch (e) {
-      setGmailError(e.message);
-    }
-    setGmailLoading(false);
-  };
-
-  const handleAnalyzeGmail = async () => {
-    if (!gmailEmail) return;
-    setGmailLoading(true); setGmailError(null); setGmailReport(null);
-    try {
-      const r = await fetchGmailAnalyze({
-        subject: gmailEmail.subject,
-        from: gmailEmail.from,
-        htmlBody: gmailEmail.htmlBody,
-        plainBody: gmailEmail.plainBody,
-        links: gmailEmail.links,
-      });
-      setGmailReport(r);
-    } catch (e) {
-      setGmailError(e.message);
-    }
-    setGmailLoading(false);
-  };
-
   return (
     <div className="panel active">
-      {/* ===== Gmail 测试邮件 ===== */}
-      <div className="card gmail-card">
-        <h2>📧 Gmail 测试邮件</h2>
-        <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 12 }}>
-          直接从测试邮箱读取最新邮件，自动提取主题、正文、链接和优惠码，并生成审核报告。省去手动复制粘贴。
-        </p>
-        {!gmailConnected ? (
-          <button className="btn btn-primary" onClick={handleConnectGmail}>
-            🔗 连接 Gmail（只读权限）
-          </button>
-        ) : (
-          <div className="gmail-actions">
-            <button className="btn btn-primary" onClick={handleReadGmail} disabled={gmailLoading}>
-              {gmailLoading ? '读取中...' : '📥 读取最新测试邮件'}
-            </button>
-            {gmailEmail && (
-              <button className="btn btn-outline" onClick={handleAnalyzeGmail} disabled={gmailLoading}>
-                🤖 生成审核报告
-              </button>
-            )}
-          </div>
-        )}
-
-        {gmailError && <div className="gmail-error">⚠️ {gmailError}</div>}
-
-        {gmailEmail && (
-          <div className="gmail-email-info" style={{ marginTop: 14 }}>
-            <div className="gmail-email-row"><strong>主题：</strong><span>{gmailEmail.subject || '(无)'}</span></div>
-            <div className="gmail-email-row"><strong>发件人：</strong><span>{gmailEmail.from || '(无)'}</span></div>
-            {gmailEmail.codes.length > 0 && (
-              <div className="gmail-email-row"><strong>优惠码：</strong><span>{gmailEmail.codes.join('、')}</span></div>
-            )}
-            {gmailEmail.links.length > 0 && (
-              <div className="gmail-email-row"><strong>链接（{gmailEmail.links.length}）：</strong><span style={{ wordBreak: 'break-all' }}>{gmailEmail.links.slice(0, 5).join(' · ')}</span></div>
-            )}
-            {gmailEmail.htmlBody && (
-              <div style={{ marginTop: 10 }}>
-                <EmailPreview subject={gmailEmail.subject} body={gmailEmail.htmlBody} compact />
-              </div>
-            )}
-          </div>
-        )}
-
-        {gmailReport && (
-          <div className="gmail-report" style={{ marginTop: 14 }}>
-            {gmailReport.raw ? (
-              <div className="gmail-report-raw" style={{ whiteSpace: 'pre-wrap', fontSize: 13, lineHeight: 1.7 }}>{gmailReport.raw}</div>
-            ) : (
-              <>
-                {gmailReport.summary && (
-                  <div className="gmail-report-summary">📋 {gmailReport.summary}</div>
-                )}
-                <div className="gmail-report-grid">
-                  {[
-                    { key: 'links', label: '🔗 链接统一性' },
-                    { key: 'spelling', label: '✏️ 拼写语法' },
-                    { key: 'copy', label: '📝 文案质量' },
-                    { key: 'design', label: '🎨 设计版式' },
-                  ].map(d => {
-                    const section = gmailReport[d.key];
-                    if (!section) return null;
-                    return (
-                      <div key={d.key} className="gmail-report-section">
-                        <div className="gmail-report-head">
-                          <strong>{d.label}</strong>
-                          <span className="gmail-report-score">{section.score ?? '—'}/100</span>
-                        </div>
-                        {section.issues && section.issues.length > 0 && (
-                          <ul className="gmail-report-list">{section.issues.map((s, i) => <li key={i}>⚠️ {s}</li>)}</ul>
-                        )}
-                        {section.strengths && section.strengths.length > 0 && (
-                          <ul className="gmail-report-list gmail-report-strengths">{section.strengths.map((s, i) => <li key={i}>✅ {s}</li>)}</ul>
-                        )}
-                        {section.suggestions && section.suggestions.length > 0 && (
-                          <ul className="gmail-report-list gmail-report-suggestions">{section.suggestions.map((s, i) => <li key={i}>💡 {s}</li>)}</ul>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </>
-            )}
-          </div>
-        )}
-      </div>
+      <HtmlAudit />
 
       <div className="card">
         <h2>邮件质量打分</h2>

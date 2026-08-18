@@ -217,3 +217,47 @@ Output in English with visual layout:
 
   return await askDeepSeek(system, prompt, 3000);
 }
+
+// ── htmlAudit: 邮件 HTML 审核（拼写语法/文案/设计 + 是否建议发送） ──
+export async function handleHtmlAudit(html, targetDomain, promoCode, linkSummary = '', subject = '', plainText = '') {
+  const stripped = (html || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  const text = (plainText || stripped).slice(0, 2000);
+  const system = '你是严格的 EDM 邮件审核专家。检查拼写语法、文案和设计，并给出是否建议发送的结论。仅输出 JSON，不要输出 JSON 以外的内容。';
+  const prompt = `请审核这封 EDM 邮件。
+
+主题行：${subject || '(未提取)'}
+目标主域名：${targetDomain || '(未指定)'}
+本次优惠码：${promoCode || '(未指定)'}
+
+【链接检查结果（程序自动提取，供你参考）】
+${linkSummary || '(无)'}
+
+【邮件正文（截取前 2000 字）】
+${text || '(空)'}
+
+请从以下维度审核，返回 JSON：
+{
+  "spelling": { "issues": ["拼写/语法/标点问题"], "suggestions": ["修改建议"] },
+  "copy": { "issues": ["文案问题"], "suggestions": ["文案优化建议"] },
+  "design": { "issues": ["设计/版式问题"], "suggestions": ["设计建议"] },
+  "verdict": { "send": "yes | caution | no", "reason": "是否建议发送的一句话理由" }
+}
+
+审核要点：
+- 拼写语法：英文拼写、语法、标点、大小写、多余空格、错别字
+- 文案：标题/主题吸引力、CTA 是否清晰、价值主张是否明确、优惠码是否突出
+- 设计：移动端适配、图片占比、按钮大小与可点击性、信息层级、暗黑模式兼容
+- verdict：无高危问题 → yes；有需修复的问题 → caution；有严重问题（坏链接/明显错误/优惠码缺失）→ no`;
+
+  const result = await askDeepSeek(system, prompt, 2500);
+  const json = result.replace(/```(json)?/g, '').trim();
+  try {
+    return JSON.parse(json);
+  } catch {
+    return {
+      spelling: {}, copy: {}, design: {},
+      verdict: { send: 'caution', reason: 'AI 审核结果解析失败，请人工复核' },
+      raw: result,
+    };
+  }
+}

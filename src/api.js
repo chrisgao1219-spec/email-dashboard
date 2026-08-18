@@ -74,19 +74,8 @@ export function fetchStrategyScenarios()    { return get('strategyScenarios'); }
 export function generateStrategy(params)    { return post('strategyGenerate', params); }
 export function quickGenerate(params)       { return post('strategyQuickGenerate', params); }
 
-// Gmail 测试邮箱功能（独立路由 /api/gmail，不走 endpoint 分发）
-export function fetchGmailStatus()          { return fetchJson('/api/gmail?action=status'); }
-export function getGmailAuthUrl()           { return '/api/gmail?action=auth'; }
-export function fetchGmailRead() {
-  return fetchJson('/api/gmail?action=read', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-}
-export function fetchGmailAnalyze(payload) {
-  return fetchJson('/api/gmail?action=analyze', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload || {}),
-  });
-}
+// 邮件 HTML 审核（走 endpoint 分发）
+export function fetchHtmlAudit(params)      { return post('htmlAudit', params); }
 
 // 竞品邮件原文（可套用模板）
 export function fetchCompetitorEmail(type) { return get('competitorEmail', { type }); }

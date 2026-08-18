@@ -83,6 +83,23 @@ export default async function handler(req, res) {
     return;
   }
 
+  // HTML audit — local DeepSeek review (no GAS/competitor context needed)
+  if (endpoint === 'htmlAudit') {
+    if (req.method === 'OPTIONS') {
+      res.status(204).setHeader('Access-Control-Allow-Origin', '*').setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS').setHeader('Access-Control-Allow-Headers', 'Content-Type').end();
+      return;
+    }
+    try {
+      const { handleHtmlAudit } = await import('./ai-handler.js');
+      const body = req.method === 'POST' ? (req.body && typeof req.body === 'object' ? req.body : {}) : {};
+      const data = await handleHtmlAudit(body.html, body.targetDomain, body.promoCode, body.linkSummary, body.subject, body.plainText);
+      res.status(200).json(data);
+    } catch (e) {
+      res.status(500).json({ error: e.message || 'HTML audit error' });
+    }
+    return;
+  }
+
   // AI endpoints — fetch competitor data context, then call DeepSeek
   if (endpoint && AI_ENDPOINTS.has(endpoint)) {
     if (req.method === 'OPTIONS') {
