@@ -2,7 +2,7 @@ const WRITE_ENDPOINTS = new Set(['runFull', 'runQuick', 'dedup', 'setAiKey', 're
 const READ_ENDPOINTS = new Set(['config', 'stats', 'dashboard', 'subjects', 'action', 'weekly', 'compare', 'inspire', 'copy', 'templates', 'bundle', 'aiStatus', 'aiIdeas', 'strategy', 'calendar', 'digest', 'sheetUrl', 'registered', 'shopifyData', 'competitorEmail']);
 const ALL_ENDPOINTS = new Set([...WRITE_ENDPOINTS, ...READ_ENDPOINTS]);
 const STRATEGY_ENDPOINTS = new Set(['strategyGenerate', 'strategyBrands', 'strategyScenarios', 'strategyQuickGenerate']);
-const AI_ENDPOINTS = new Set(['aiIdeas', 'template', 'inspire', 'score', 'rewrite', 'digest', 'customTemplate', 'generateCampaign']);
+const AI_ENDPOINTS = new Set(['aiIdeas', 'template', 'inspire', 'score', 'rewrite', 'digest', 'customTemplate', 'generateCampaign', 'generateCalendar']);
 const REQUEST_TIMEOUT_MS = 25000;
 
 // Local strategy handler — no GAS dependency
@@ -107,7 +107,7 @@ export default async function handler(req, res) {
       return;
     }
     try {
-      const { handleAiIdeas, handleTemplate, handleInspire, handleScore, handleRewrite, handleDigest, handleCustomTemplate, handleGenerateCampaign } = await import('./ai-handler.js');
+      const { handleAiIdeas, handleTemplate, handleInspire, handleScore, handleRewrite, handleDigest, handleCustomTemplate, handleGenerateCampaign, handleGenerateCalendar } = await import('./ai-handler.js');
       const params = method === 'POST' ? (req.body && typeof req.body === 'object' ? req.body : {}) : (req.query || {});
       const brand = params.brand || '';
 
@@ -171,6 +171,10 @@ export default async function handler(req, res) {
         }
         case 'generateCampaign': {
           const data = await handleGenerateCampaign(params.prompt);
+          return res.status(200).json(data);
+        }
+        case 'generateCalendar': {
+          const data = await handleGenerateCalendar(params);
           return res.status(200).json(data);
         }
         default:

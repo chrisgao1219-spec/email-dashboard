@@ -284,3 +284,105 @@ export async function handleGenerateCampaign(prompt) {
     return { raw: result, error: 'AI 返回内容解析失败，请重试或使用手动 Prompt 模式' };
   }
 }
+
+// ── generateCalendar: 竞品分析 + 月度运营日历排期 ──
+export async function handleGenerateCalendar(params) {
+  const { year, month, stats, subjects } = params || {};
+  const statsStr = stats ? JSON.stringify(stats) : '（无竞品统计数据）';
+  const subjectsStr = Array.isArray(subjects)
+    ? subjects.slice(0, 15).map(s => s.subject || s).filter(Boolean).join(' | ')
+    : '（无主题行数据）';
+
+  const system = '你是欧美/英国 eScooter / 户外出行类目 EDM 运营日历规划师。基于竞品数据生成可直接使用的月度排期。只输出 JSON，不要输出 JSON 以外的内容。';
+  const prompt = `请基于以下竞品数据，生成 ${year} 年 ${month} 月 的月度日历排期。
+
+【竞品统计数据】
+${statsStr}
+
+【竞品Top主题行】
+${subjectsStr}
+
+业务背景：
+- 中国卖家，主要市场欧美/英国
+- 品类 eScooter / 户外出行
+- 每月主邮件 8-10 封（自动化另算）
+- 邮件类型要均衡，不要全是促销
+- 高客单价产品不要默认大额折扣，优先免运、配件包、延保、分期提醒、售后承诺、选车咨询
+
+请输出一个完整 JSON 对象，顶层包含 competitorInsights 和 calendarTemplate 两个字段：
+
+1. competitorInsights（先分析竞品数据）：
+{
+  "summary": "竞品策略一句话总结",
+  "sendFrequency": "竞品每月大约发几封",
+  "dominantEmailTypes": ["最常用邮件类型"],
+  "promotionPattern": "竞品优惠方式：折扣/免运/配件包/延保/分期/库存提醒",
+  "holidayTiming": "竞品节日前提前几天预热",
+  "contentGaps": ["竞品内容空白"],
+  "followStrategy": ["应该跟随什么"],
+  "differentiateStrategy": ["应该错位什么"],
+  "calendarAdjustmentRules": ["日历排期调整规则"]
+}
+
+2. calendarTemplate（月度排期，可直接给前端）：
+{
+  "year": ${year},
+  "month": ${month},
+  "market": "欧美英",
+  "category": "eScooter / 户外出行",
+  "monthlyTheme": "本月主题",
+  "monthlyFocus": "本月重点",
+  "sellerNote": "中国卖家放假/物流提醒（如当月有春节/五一/国庆/中秋等中国长假，必须写清楚假期通知、客服响应、发货时效、配送截止说明；没有则写无）",
+  "mailCount": 8,
+  "events": [
+    {
+      "date": "${year}-${String(month).padStart(2,'0')}-01",
+      "type": "月初迎新",
+      "market": "欧美英",
+      "isHoliday": false,
+      "holidayName": "",
+      "title": "邮件标题",
+      "contentLevel": "L2 教育",
+      "content": "邮件内容要点",
+      "cta": "行动按钮",
+      "offerNeeded": false,
+      "offerType": "",
+      "competitorReason": "为什么根据竞品数据这样安排",
+      "scheduleReason": "为什么安排在这个日期"
+    }
+  ],
+  "holidays": [
+    {
+      "date": "节日日期",
+      "name": "节日名",
+      "market": "欧美英",
+      "recommendedAction": "建议动作",
+      "preheatDays": 14
+    }
+  ]
+}
+
+字段要求：
+- events 必须有 8-10 条主邮件，date 格式 YYYY-MM-DD
+- type 只能从：月初迎新、选车教育、用户故事、节日促销、假期通知、售后保养、新品上新、弃购召回 中选
+- contentLevel 只能从：L1 转化、L2 教育、L3 信任、L4 通知 中选
+- holidays 必须列出当月重要欧美/英国节日（如 Black Friday、Thanksgiving、Cyber Monday、Memorial Day 等），节日当天必须在 events 中单独安排邮件（isHoliday=true + holidayName）
+- 如果某封邮件围绕节日发送，isHoliday=true 并填 holidayName
+- 邮件类型均衡：销售型（节日促销/新品/弃购召回）占比不超过一半，其余给教育/信任/通知/用户故事
+- 高客单价：促销类邮件优先免运/配件包/延保，不要默认 20%+ 折扣
+
+只输出 JSON，不要 Markdown，不要解释。`;
+
+  const result = await askDeepSeek(system, prompt, 4000);
+  const json = result.replace(/```(json)?/g, '').trim();
+  try {
+    return JSON.parse(json);
+  } catch {
+    const start = json.indexOf('{');
+    const end = json.lastIndexOf('}');
+    if (start >= 0 && end > start) {
+      try { return JSON.parse(json.slice(start, end + 1)); } catch { /* ignore */ }
+    }
+    return { error: 'AI 返回内容解析失败，请重试', raw: result };
+  }
+}

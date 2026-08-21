@@ -7,9 +7,9 @@ function withKey(params = {}) {
   return API_KEY ? { ...params, apiKey: API_KEY } : params;
 }
 
-async function fetchJson(url, options = {}) {
+async function fetchJson(url, options = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const res = await fetch(url, { ...options, signal: controller.signal });
@@ -82,3 +82,20 @@ export function fetchCompetitorEmail(type) { return get('competitorEmail', { typ
 
 // 邮件活动生成器（调 DeepSeek 生成结构化邮件 JSON）
 export function fetchGenerateCampaign(prompt) { return post('generateCampaign', { prompt }); }
+
+// AI 月度日历排期生成（长超时，DeepSeek 生成慢）
+export function fetchGenerateCalendar(params) {
+  return fetchJson(API_BASE + '?endpoint=generateCalendar', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(withKey(params)),
+  }, 45000);
+}
+
+// 短超时版竞品数据（日历生成用，GAS 慢时快速降级）
+export function fetchStatsQuick() {
+  return fetchJson(API_BASE + '?' + new URLSearchParams({ endpoint: 'stats', ...withKey() }).toString(), {}, 8000);
+}
+export function fetchTopSubjectsQuick() {
+  return fetchJson(API_BASE + '?' + new URLSearchParams({ endpoint: 'subjects', ...withKey() }).toString(), {}, 8000);
+}
