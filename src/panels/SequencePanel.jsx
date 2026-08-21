@@ -127,6 +127,37 @@ export const TEMPLATE_TYPES = {
   winback: '沉默唤醒',
 };
 
+// 我的竞品邮件截图（本地 public/email-templates/，按 1.1、2.1 前缀归属流程）
+export const MY_EMAIL_REFERENCES = {
+  welcome: [
+    { image: '/email-templates/1.1.png', label: '参考截图 1.1', note: '欢迎系列参考邮件' },
+    { image: '/email-templates/1.2.png', label: '参考截图 1.2', note: '欢迎系列参考邮件' },
+    { image: '/email-templates/1.3.png', label: '参考截图 1.3', note: '欢迎系列参考邮件' },
+    { image: '/email-templates/1.4.png', label: '参考截图 1.4', note: '欢迎系列参考邮件' },
+  ],
+  browse: [
+    { image: '/email-templates/2.1.png', label: '参考截图 2.1', note: '弃浏览参考邮件' },
+    { image: '/email-templates/2.2.png', label: '参考截图 2.2', note: '弃浏览参考邮件' },
+  ],
+  abandoned: [
+    { image: '/email-templates/3.1.png', label: '参考截图 3.1', note: '弃购参考邮件' },
+    { image: '/email-templates/3.2.png', label: '参考截图 3.2', note: '弃购参考邮件' },
+    { image: '/email-templates/3.3.png', label: '参考截图 3.3', note: '弃购参考邮件' },
+  ],
+  abandoned_checkout: [
+    { image: '/email-templates/4.1.png', label: '参考截图 4.1', note: '弃单参考邮件' },
+  ],
+  postpurchase: [
+    { image: '/email-templates/5.1.png', label: '参考截图 5.1', note: '购后跟进参考邮件' },
+  ],
+  review_invite: [
+    { image: '/email-templates/6.1.png', label: '参考截图 6.1', note: '邀评参考邮件' },
+  ],
+  winback: [
+    { image: '/email-templates/7.1.png', label: '参考截图 7.1', note: '沉默唤醒参考邮件' },
+  ],
+};
+
 export default function SequencePanel() {
   const [expanded, setExpanded] = useState(null);
 

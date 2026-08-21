@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
-import { SEQUENCES, TEMPLATE_TYPES } from './SequencePanel';
+import { SEQUENCES, TEMPLATE_TYPES, MY_EMAIL_REFERENCES } from './SequencePanel';
 import { fetchCompetitorEmail } from '../api';
+import EmailReferences from '../components/EmailReferences';
 
 const QUICK_GUIDE = [
   { condition: '有新订阅用户？', action: '先用欢迎系列', seq: 'welcome', icon: '👋', color: '#10b981' },
@@ -8,6 +9,20 @@ const QUICK_GUIDE = [
   { condition: '有浏览未买？', action: '先用浏览召回', seq: 'browse', icon: '👀', color: '#8b5cf6' },
   { condition: '刚完成购买？', action: '开启购后跟进', seq: 'postpurchase', icon: '📦', color: '#6366f1' },
   { condition: '60天没互动？', action: '启动沉默唤醒', seq: 'winback', icon: '💤', color: '#f59e0b' },
+];
+
+// 推荐订阅的竞品网站
+const RECOMMENDED_SITES = [
+  { name: 'ENGWE', url: 'https://engwe-bikes.com/' },
+  { name: 'Heybike', url: 'https://www.heybike.com/' },
+  { name: 'Hiboy', url: 'https://www.hiboy.com/' },
+  { name: 'Aventon', url: 'https://www.aventon.com/' },
+  { name: 'Rad Power Bikes', url: 'https://www.radpowerbikes.com/' },
+  { name: 'Lectric eBikes', url: 'https://lectricebikes.com/' },
+  { name: 'Velotric', url: 'https://www.velotricbike.com/' },
+  { name: 'Ride1Up', url: 'https://ride1up.com/' },
+  { name: 'Segway', url: 'https://store.segway.com/' },
+  { name: 'NIU', url: 'https://shop.niu.com/' },
 ];
 
 export default function AutomationPanel({ initialExpand }) {
@@ -140,6 +155,10 @@ export default function AutomationPanel({ initialExpand }) {
                     </button>
                   )}
                 </div>
+                <div className="seq-references">
+                  <div className="seq-references-title">🖼️ 我的竞品邮件截图</div>
+                  <EmailReferences images={MY_EMAIL_REFERENCES[seq.id] || []} />
+                </div>
               </div>
             )}
           </div>
@@ -148,6 +167,24 @@ export default function AutomationPanel({ initialExpand }) {
 
       <div className="card" style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
         把这些序列规则复制到你的 ESP（Klaviyo / Mailchimp / Omnisend）自动化设置中即可。
+      </div>
+
+      {/* 推荐订阅的竞品网站 */}
+      <div className="card seq-sites-card">
+        <h2>🌐 推荐订阅的竞品网站</h2>
+        <p className="seq-sites-intro">
+          订阅竞品官网邮件是最方便、最真实的竞品监控方式。建议用一个专门的竞品观察邮箱，订阅主要户外出行和电动出行品牌的 newsletter、优惠弹窗、弃购流程和节日活动。这样可以持续观察他们的标题、折扣节奏、视觉风格、CTA、发送时间和自动化逻辑。
+        </p>
+        <div className="sites-grid">
+          {RECOMMENDED_SITES.map(site => (
+            <a key={site.name} className="site-link" href={site.url} target="_blank" rel="noopener noreferrer">
+              {site.name} ↗
+            </a>
+          ))}
+        </div>
+        <p className="seq-sites-warn">
+          ⚠️ 提醒：这些网站用于长期订阅和观察，不是复制原文、图片或品牌表达。
+        </p>
       </div>
     </div>
   );

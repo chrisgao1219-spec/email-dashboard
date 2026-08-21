@@ -79,3 +79,6 @@ export function fetchHtmlAudit(params)      { return post('htmlAudit', params); 
 
 // 竞品邮件原文（可套用模板）
 export function fetchCompetitorEmail(type) { return get('competitorEmail', { type }); }
+
+// 邮件活动生成器（调 DeepSeek 生成结构化邮件 JSON）
+export function fetchGenerateCampaign(prompt) { return post('generateCampaign', { prompt }); }
