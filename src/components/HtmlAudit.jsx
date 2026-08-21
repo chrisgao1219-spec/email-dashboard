@@ -18,7 +18,7 @@ const SOCIAL_DOMAINS = ['facebook.com', 'fb.com', 'instagram.com', 'twitter.com'
 const CTA_KEYWORDS = ['buy now', 'shop now', 'learn more', 'claim', 'view deal', 'get yours', 'order now', 'shop', 'buy', 'get the deal', 'explore', 'discover', 'grab', '立即购买', '立即抢购', '了解更多', '查看详情', '马上抢', '立即下单', '现在购买', '购买', '抢购'];
 
 // 追踪链接里常见的「真实目标」参数名
-const TRACKING_PARAM_NAMES = ['url', 'u', 'target', 'redirect', 'destination', 'link', 'next', 'goto', 'redir', 'rurl', 'dest', 'redirect_url', 'return'];
+const TRACKING_PARAM_NAMES = ['url', 'u', 'target', 'redirect', 'destination', 'link', 'next', 'goto', 'redir', 'rurl', 'dest', 'redirect_url', 'redirect_to', 'target_url', 'url_to', 'return', 'out', 'l', 'rd', 'to'];
 
 // 常见的两段式二级域名（用于正确取主域名）
 const TWO_PART_TLDS = ['co.uk', 'com.au', 'com.cn', 'co.jp', 'com.br', 'co.nz', 'co.in', 'com.sg', 'com.hk', 'com.mx', 'co.kr'];
@@ -116,24 +116,57 @@ function extractPrice(text) {
   return m ? m[0].replace(/\s+/g, '') : '';
 }
 
-// 从追踪链接里解析真实目标（url/u/target/redirect/destination/link 等参数）
+// 尝试把候选值解码成 http(s) URL（支持多层 URL 编码 + base64）
+function tryDecodeToUrl(raw) {
+  let cur = raw;
+  for (let i = 0; i < 3; i++) {
+    if (/^https?:\/\//i.test(cur)) return cur;
+    // base64（含 urlsafe 变体）
+    if (/^[A-Za-z0-9_-]{12,}={0,2}$/.test(cur)) {
+      try {
+        let b64 = cur.replace(/-/g, '+').replace(/_/g, '/');
+        while (b64.length % 4) b64 += '=';
+        const bin = atob(b64);
+        const dec = new TextDecoder('utf-8').decode(Uint8Array.from(bin, c => c.charCodeAt(0)));
+        if (dec !== cur) { cur = dec; continue; }
+      } catch {}
+    }
+    // URL 解码
+    try {
+      const dec = decodeURIComponent(cur);
+      if (dec !== cur) { cur = dec; continue; }
+    } catch {}
+    break;
+  }
+  return /^https?:\/\//i.test(cur) ? cur : '';
+}
+
+// 从追踪链接里解析真实目标（query 参数 + 路径 + base64，大小写不敏感）
 function resolveFinalTarget(href) {
   if (!href) return '';
+  const candidates = [];
   try {
     const u = new URL(href.startsWith('//') ? 'http:' + href : href);
-    for (const name of TRACKING_PARAM_NAMES) {
-      const v = u.searchParams.get(name);
-      if (v) {
-        try {
-          const decoded = decodeURIComponent(v);
-          if (/^https?:\/\//i.test(decoded)) return decoded;
-        } catch {}
-      }
+    // 1) query 参数（大小写不敏感）
+    for (const [key, val] of u.searchParams.entries()) {
+      if (TRACKING_PARAM_NAMES.includes(key.toLowerCase())) candidates.push(val);
     }
-    return '';
+    // 2) 路径里可能藏了编码后的 URL（如 /r/<url>、/click/<url>）
+    const path = u.pathname || '';
+    const pathUrl = path.match(/(?:https?%3A%2F%2F|https?:\/\/)[^/?#]+/i);
+    if (pathUrl) candidates.push(pathUrl[0]);
+    // 3) 路径末段可能是 base64 编码的真实 URL
+    const lastSeg = path.split('/').filter(Boolean).pop() || '';
+    if (/^[A-Za-z0-9_-]{12,}={0,2}$/.test(lastSeg)) candidates.push(lastSeg);
   } catch {
     return '';
   }
+
+  for (const c of candidates) {
+    const dec = tryDecodeToUrl(c);
+    if (dec) return dec;
+  }
+  return '';
 }
 
 // 用 DOMParser 提取所有 <a>（含图片/按钮/文字/追踪）和独立 <img>
@@ -195,6 +228,19 @@ function extractCodes(html) {
     if (!codes.includes(c)) codes.push(c);
   }
   return codes;
+}
+
+// 从纯文本版里提取所有 URL（很多 ESP 在 text/plain 里保留真实网址）
+function extractPlainUrls(plainText) {
+  if (!plainText) return [];
+  const urls = [];
+  const re = /https?:\/\/[^\s<>"'\\)\]]+/gi;
+  let m;
+  while ((m = re.exec(plainText)) !== null) {
+    const u = m[0].replace(/[),.;:，。；：]+$/, '');
+    if (u && !urls.includes(u)) urls.push(u);
+  }
+  return urls;
 }
 
 function checkPromoCode(html, expectedCode) {
@@ -390,6 +436,17 @@ export default function HtmlAudit() {
 
   const mainDomains = useMemo(() => [...new Set(items.map(it => it.mainDomain).filter(Boolean))], [items]);
 
+  const finalDomains = useMemo(() => {
+    const s = new Set();
+    items.forEach(it => {
+      if (it.finalTarget) {
+        const h = getHostname(it.finalTarget);
+        if (h) s.add(getMainDomain(h));
+      }
+    });
+    return [...s];
+  }, [items]);
+
   const mechanicalIssues = useMemo(() => {
     const issues = [];
     const links = items.filter(it => it.kind === 'link');
@@ -405,6 +462,15 @@ export default function HtmlAudit() {
 
   const promoAudit = useMemo(() => html.trim() ? checkPromoCode(html, promoCode) : null, [html, promoCode]);
   const infoScan = useMemo(() => html.trim() ? scanInfoConsistency(html) : null, [html]);
+
+  // 纯文本版里的真实链接（排除 mamba 等追踪域名）
+  const plainRealUrls = useMemo(() => {
+    return extractPlainUrls(plainText).filter(u => {
+      const h = getHostname(u);
+      const main = h ? getMainDomain(h) : '';
+      return !main.includes('mambasendtrack') && !main.includes('mamba');
+    });
+  }, [plainText]);
 
   const itemsSummary = useMemo(() => {
     if (!items.length) return '';
@@ -661,12 +727,27 @@ export default function HtmlAudit() {
         </div>
       )}
 
+      {/* 纯文本版真实链接 */}
+      {plainRealUrls.length > 0 && (
+        <div className="score-section">
+          <h3 className="score-section-title">纯文本版真实链接（从 text/plain 提取）</h3>
+          <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.7, wordBreak: 'break-all' }}>
+            {plainRealUrls.map((u, i) => <div key={i}>🔗 {u}</div>)}
+          </div>
+        </div>
+      )}
+
       {/* 主域名参考 */}
-      {mainDomains.length > 0 && (
+      {(mainDomains.length > 0 || finalDomains.length > 0) && (
         <div className="score-section">
           <h3 className="score-section-title">主域名参考（不参与扣分）</h3>
-          <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.7 }}>
-            {mainDomains.map(d => <span key={d} className="cat-badge" style={{ marginRight: 6, color: '#64748b' }}>{d}</span>)}
+          <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.8 }}>
+            {mainDomains.length > 0 && (
+              <div>追踪域名：{mainDomains.map(d => <span key={d} className="cat-badge" style={{ marginRight: 6, color: '#db2777' }}>{d}</span>)}</div>
+            )}
+            {finalDomains.length > 0 && (
+              <div style={{ marginTop: 4 }}>最终目标域名（真实产品站）：{finalDomains.map(d => <span key={d} className="cat-badge" style={{ marginRight: 6, color: '#059669' }}>{d}</span>)}</div>
+            )}
           </div>
         </div>
       )}
