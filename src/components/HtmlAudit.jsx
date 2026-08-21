@@ -1,20 +1,31 @@
 import { useState, useMemo, useRef } from 'react';
 import { fetchHtmlAudit } from '../api';
 
-// 疑似测试/占位链接的特征
+// 疑似测试/占位链接的特征（用于机械检查，不涉及主域名）
 const TEST_LINK_PATTERNS = [
   'test', 'example', 'localhost', '127.0.0.1', 'placehold', 'sample',
   'demo', 'staging', 'dev.', 'yourdomain', 'mysite', 'xxx', 'preview',
   'your-', 'fill', 'todo', 'placeholder',
 ];
 
-// 未替换的模板变量（如 {{url}}、{link}、%%LINK%%、[URL]、${x}）
-const VARIABLE_LINK_RE = /\{\{|\}\}|\{link\}|\{url\}|\{tracking\}|\{cta\}|%%[a-z0-9_]+%%|\[(link|url|tracking|cta|href)\]|\$\{|\$[a-z_]+/i;
+// 未替换的模板变量（如 {{ product.url }}、{link}、%%LINK%%、[URL]、${x}）
+const VARIABLE_LINK_RE = /\{\{|\}\}|\{link\}|\{url\}|\{tracking\}|\{cta\}|%%[a-z0-9_]+%%|\[(link|url|tracking|cta|href|product_url)\]|\$\{|\$[a-z_]+/i;
+
+// 常见社媒域名
+const SOCIAL_DOMAINS = ['facebook.com', 'fb.com', 'instagram.com', 'twitter.com', 'x.com', 'tiktok.com', 'youtube.com', 'youtu.be', 'linkedin.com', 'pinterest.com', 'snapchat.com', 'weibo.com', 'reddit.com', 'threads.net'];
+// 追踪链接特征
+const TRACKING_HINTS = ['track', 'click', 'redirect', 'utm_', 'mailer', 'sendgrid', 'mailchimp', 'klaviyo', 'omnisend', 'litmus', 'mandrill', 'mkt', 'esp.', 'em.', '/l/', '/r/'];
 
 // 常见的两段式二级域名（用于正确取主域名）
 const TWO_PART_TLDS = ['co.uk', 'com.au', 'com.cn', 'co.jp', 'com.br', 'co.nz', 'co.in', 'com.sg', 'com.hk', 'com.mx', 'co.kr'];
 
-// 归一化目标域名 → 主域名（去掉协议、www、路径）
+const CAT_COLORS = {
+  '产品链接': '#059669', '活动页/集合页': '#2563eb', '社媒': '#7c3aed',
+  '退订': '#64748b', '隐私/条款': '#64748b', '查看网页版': '#64748b',
+  '图片资源': '#d97706', '追踪链接': '#db2777', '其他链接': '#64748b',
+};
+
+// 归一化目标域名 → hostname（去掉协议、www、路径）
 function normalizeDomain(input) {
   let s = (input || '').trim();
   if (!s) return '';
@@ -23,6 +34,14 @@ function normalizeDomain(input) {
     return new URL(s).hostname.replace(/^www\./, '').toLowerCase();
   } catch {
     return input.trim().toLowerCase().replace(/^https?:\/\//i, '').replace(/^www\./i, '').split(/[/?#]/)[0];
+  }
+}
+
+function getHostname(url) {
+  try {
+    return new URL(url.startsWith('//') ? 'http:' + url : url).hostname.replace(/^www\./, '').toLowerCase();
+  } catch {
+    return null;
   }
 }
 
@@ -35,32 +54,8 @@ function getMainDomain(hostname) {
   return lastTwo;
 }
 
-function getHostname(url) {
-  try {
-    return new URL(url.startsWith('//') ? 'http:' + url : url).hostname.replace(/^www\./, '').toLowerCase();
-  } catch {
-    return null;
-  }
-}
-
-// 提取所有 <a href> 和 <img src>
-function extractUrls(html) {
-  const urls = [];
-  const hrefRe = /href\s*=\s*["']([^"']*)["']/gi;
-  let m;
-  while ((m = hrefRe.exec(html)) !== null) {
-    const url = m[1].trim();
-    if (url && !urls.some(u => u.url === url && u.type === 'link')) urls.push({ url, type: 'link' });
-  }
-  const srcRe = /<img[^>]+src\s*=\s*["']([^"']*)["']/gi;
-  while ((m = srcRe.exec(html)) !== null) {
-    const url = m[1].trim();
-    if (url && !urls.some(u => u.url === url && u.type === 'image')) urls.push({ url, type: 'image' });
-  }
-  return urls;
-}
-
-function classifyLink(url, targetMain) {
+// 机械检查（只判空/#/测试/未替换变量/相对路径/无法解析，不判主域名）
+function classifyMechanical(url) {
   if (!url) return { status: 'empty', label: '空链接' };
   if (url === '#' || url.startsWith('#')) return { status: 'hash', label: '锚点/占位' };
   if (/^(mailto:|tel:|sms:|data:)/i.test(url)) return { status: 'ok', label: '非网页链接' };
@@ -70,31 +65,49 @@ function classifyLink(url, targetMain) {
   if (url.startsWith('/') || (!/^[a-z][a-z0-9+.-]*:\/\//i.test(url) && !url.startsWith('//'))) {
     return { status: 'relative', label: '相对路径' };
   }
-  const hostname = getHostname(url);
-  if (!hostname) return { status: 'invalid', label: '无法解析' };
-  const mainDomain = getMainDomain(hostname);
-  if (targetMain && mainDomain !== targetMain) return { status: 'mismatch', label: '主域名不一致', hostname, mainDomain };
-  return { status: 'ok', label: '正常', hostname, mainDomain };
+  if (!getHostname(url)) return { status: 'invalid', label: '无法解析' };
+  return { status: 'ok', label: '正常' };
 }
 
-function auditLinks(html, targetDomain) {
-  const targetMain = targetDomain ? getMainDomain(targetDomain) : '';
-  const links = extractUrls(html).map(({ url, type }) => {
-    const c = classifyLink(url, targetMain);
-    return { href: url, type, ...c };
+// 链接分类（粗分类，供展示；产品匹配的精细判断交给 AI）
+function classifyCategory(kind, url, text, hostname) {
+  if (kind === 'image') return '图片资源';
+  const h = (hostname || '').toLowerCase();
+  const t = (text || '').toLowerCase();
+  let path = '';
+  try { path = new URL(url.startsWith('//') ? 'http:' + url : url).pathname.toLowerCase(); } catch {}
+  const combo = t + ' ' + path;
+  if (SOCIAL_DOMAINS.some(d => h === d || h.endsWith('.' + d))) return '社媒';
+  if (/unsubscribe|退订|opt-?out|unsub/i.test(combo)) return '退订';
+  if (/privacy|terms|隐私|条款|policy|legal/i.test(combo)) return '隐私/条款';
+  if (/view in browser|viewonline|网页版|web version|view-online/i.test(combo)) return '查看网页版';
+  if (TRACKING_HINTS.some(k => h.includes(k) || url.toLowerCase().includes(k))) return '追踪链接';
+  if (/\/products?\/|\/dp\/|\/product-|\/item\//i.test(path)) return '产品链接';
+  if (/\/collections?\/|\/category\/|\/pages\/|\/campaign|\/sale|\/promo|\/shop\b/i.test(path)) return '活动页/集合页';
+  return '其他链接';
+}
+
+// 用 DOMParser 提取所有 <a> 和 <img>（保持文档顺序 + 锚文本/alt）
+function extractItems(html) {
+  let doc;
+  try {
+    doc = new DOMParser().parseFromString(html, 'text/html');
+  } catch {
+    return [];
+  }
+  const items = [];
+  doc.querySelectorAll('a, img').forEach(el => {
+    const kind = el.tagName === 'IMG' ? 'image' : 'link';
+    const url = kind === 'image' ? (el.getAttribute('src') || '') : (el.getAttribute('href') || '');
+    let text = (el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 80);
+    if (kind === 'link' && !text) {
+      const img = el.querySelector('img');
+      text = (img?.getAttribute('alt') || '').slice(0, 80);
+    }
+    if (kind === 'image') text = (el.getAttribute('alt') || '').slice(0, 80);
+    items.push({ kind, url, text });
   });
-  const mainDomains = [...new Set(links.map(l => l.mainDomain).filter(Boolean))];
-  const count = (s) => links.filter(l => l.status === s);
-  const issues = [];
-  if (count('empty').length) issues.push(`有 ${count('empty').length} 个空链接（href/src 为空）`);
-  if (count('hash').length) issues.push(`有 ${count('hash').length} 个「#」占位链接未替换`);
-  if (count('variable').length) issues.push(`有 ${count('variable').length} 个链接包含未替换的模板变量`);
-  if (count('test').length) issues.push(`有 ${count('test').length} 个测试/预览/localhost 链接`);
-  if (count('relative').length) issues.push(`有 ${count('relative').length} 个相对路径链接（邮件中需用绝对 URL）`);
-  if (count('invalid').length) issues.push(`有 ${count('invalid').length} 个无法解析的链接`);
-  if (targetMain && count('mismatch').length) issues.push(`${count('mismatch').length} 个链接主域名与目标「${targetMain}」不一致`);
-  if (mainDomains.length > 1) issues.push(`出现 ${mainDomains.length} 个不同主域名：${mainDomains.join('、')}`);
-  return { links, mainDomains, issues, unified: mainDomains.length <= 1 };
+  return items;
 }
 
 function extractCodes(html) {
@@ -128,7 +141,6 @@ function checkPromoCode(html, expectedCode) {
 function scanInfoConsistency(html) {
   const text = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
   const issues = [];
-
   const pctRe = /(\d{1,3})\s*%/g;
   const pcts = new Set();
   let m;
@@ -242,9 +254,44 @@ export default function HtmlAudit() {
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef(null);
 
-  const linkAudit = useMemo(() => html.trim() ? auditLinks(html, normalizeDomain(targetDomain)) : null, [html, targetDomain]);
+  // 结构化提取 + 机械检查 + 粗分类
+  const items = useMemo(() => {
+    if (!html.trim()) return [];
+    return extractItems(html).map(it => {
+      const mech = it.kind === 'link' ? classifyMechanical(it.url) : { status: 'ok', label: '图片' };
+      const hostname = getHostname(it.url) || '';
+      const mainDomain = hostname ? getMainDomain(hostname) : '';
+      const category = classifyCategory(it.kind, it.url, it.text, hostname);
+      return { ...it, mech, hostname, mainDomain, category };
+    });
+  }, [html]);
+
+  const mainDomains = useMemo(() => [...new Set(items.map(it => it.mainDomain).filter(Boolean))], [items]);
+
+  const mechanicalIssues = useMemo(() => {
+    const issues = [];
+    const links = items.filter(it => it.kind === 'link');
+    const count = (s) => links.filter(l => l.mech.status === s);
+    if (count('empty').length) issues.push(`有 ${count('empty').length} 个空链接（href 为空）`);
+    if (count('hash').length) issues.push(`有 ${count('hash').length} 个「#」占位链接未替换`);
+    if (count('variable').length) issues.push(`有 ${count('variable').length} 个链接含未替换变量（如 {{ product.url }}、{link}、[url]）`);
+    if (count('test').length) issues.push(`有 ${count('test').length} 个测试/preview/localhost 链接`);
+    if (count('relative').length) issues.push(`有 ${count('relative').length} 个相对路径链接（邮件中需用绝对 URL）`);
+    if (count('invalid').length) issues.push(`有 ${count('invalid').length} 个无法解析的链接`);
+    return issues;
+  }, [items]);
+
   const promoAudit = useMemo(() => html.trim() ? checkPromoCode(html, promoCode) : null, [html, promoCode]);
   const infoScan = useMemo(() => html.trim() ? scanInfoConsistency(html) : null, [html]);
+
+  const itemsSummary = useMemo(() => {
+    if (!items.length) return '';
+    return items.map((it, i) => {
+      const flag = it.kind === 'link' && it.mech.status !== 'ok' ? `  ⚠️${it.mech.label}` : '';
+      const prefix = it.kind === 'image' ? `图片 alt="${it.text}"` : `链接 "${it.text}"`;
+      return `[${i + 1}] ${prefix} → ${it.url}${flag}`;
+    }).join('\n');
+  }, [items]);
 
   const canRun = html.trim().length > 0;
 
@@ -281,10 +328,7 @@ export default function HtmlAudit() {
     if (!canRun) return;
     setLoading(true); setError(null); setAi(null);
     try {
-      const linkSummary = linkAudit
-        ? `共 ${linkAudit.links.length} 个链接（含图片）；主域名：${linkAudit.mainDomains.length ? linkAudit.mainDomains.join('、') : '未识别到'}；问题：${linkAudit.issues.length ? linkAudit.issues.join('；') : '无'}`
-        : '';
-      const r = await fetchHtmlAudit({ html, targetDomain: normalizeDomain(targetDomain), promoCode: promoCode.trim(), linkSummary, subject, plainText });
+      const r = await fetchHtmlAudit({ html, targetDomain: normalizeDomain(targetDomain), promoCode: promoCode.trim(), itemsSummary, subject, plainText });
       setAi(r);
     } catch (e) {
       setError(e.message);
@@ -293,44 +337,43 @@ export default function HtmlAudit() {
   };
 
   const highRisk = useMemo(() => [
-    ...(linkAudit?.issues || []),
+    ...mechanicalIssues,
     ...(promoAudit?.issues || []),
     ...(infoScan?.issues || []),
     ...(ai?.consistency?.issues || []),
-  ], [linkAudit, promoAudit, infoScan, ai]);
+  ], [mechanicalIssues, promoAudit, infoScan, ai]);
 
   const verdict = useMemo(() => {
-    const fatal = linkAudit && linkAudit.links.some(l => ['empty', 'hash', 'variable', 'test', 'invalid', 'mismatch', 'relative'].includes(l.status));
+    const fatalMech = ['empty', 'hash', 'variable', 'test', 'relative'].some(s => items.some(it => it.kind === 'link' && it.mech.status === s));
     const promoMissing = promoAudit && promoAudit.checked && !promoAudit.found;
     const aiSend = ai?.verdict?.send;
-    if (fatal || promoMissing || aiSend === 'no') return { send: 'no', reason: ai?.verdict?.reason || '存在高危问题（坏链接/占位链接/未替换变量/优惠码缺失），请修复后再发送' };
-    if (aiSend === 'caution' || highRisk.length > 0) return { send: 'caution', reason: ai?.verdict?.reason || '存在需修复的问题，建议优化后再发送' };
+    if (promoMissing || aiSend === 'no') return { send: 'no', reason: ai?.verdict?.reason || '存在严重问题（优惠码缺失/产品跳错/坏链接），请修复后再发送' };
+    if (fatalMech || aiSend === 'caution') return { send: 'caution', reason: ai?.verdict?.reason || '存在需修复的问题，建议优化后再发送' };
     if (ai) return { send: aiSend || 'yes', reason: ai?.verdict?.reason || '' };
     return null;
-  }, [linkAudit, promoAudit, highRisk, ai]);
+  }, [items, promoAudit, ai]);
 
   const priorities = useMemo(() => {
     const p0 = [], p1 = [], p2 = [];
-    if (linkAudit) {
-      const fatal = linkAudit.links.filter(l => ['empty', 'hash', 'variable', 'test', 'invalid', 'mismatch', 'relative'].includes(l.status));
-      if (fatal.length) p0.push(`修复 ${fatal.length} 个坏链接/占位链接/未替换变量（见下方链接清单）`);
-      if (linkAudit.mainDomains.length > 1) p1.push(`统一链接主域名（当前 ${linkAudit.mainDomains.length} 个：${linkAudit.mainDomains.join('、')}）`);
-    }
-    if (promoAudit && promoAudit.checked && !promoAudit.found) p0.push(`写入优惠码「${promoAudit.expected}」到正文或链接参数`);
-    if (infoScan?.issues?.length) p1.push(...infoScan.issues.map(s => '核对信息：' + s));
+    const productCount = ai?.productIssues?.length || 0;
+    if (productCount) p0.push(`修复 ${productCount} 处产品链接跳转/不匹配（见「产品链接匹配检查」）`);
+    if (mechanicalIssues.length) p0.push(...mechanicalIssues);
+    if (promoAudit?.checked && !promoAudit.found) p0.push(`写入优惠码「${promoAudit.expected}」`);
     if (ai) {
+      if (ai.consistency?.issues?.length) p1.push(...ai.consistency.issues.map(s => '核对：' + s));
       if (ai.spelling?.issues?.length) p1.push(`修复拼写/语法问题（${ai.spelling.issues.length} 处）`);
       if (ai.copy?.issues?.length) p2.push(`优化文案/CTA（${ai.copy.issues.length} 处）`);
       if (ai.design?.issues?.length) p2.push(`优化设计/排版（${ai.design.issues.length} 处）`);
     }
+    if (infoScan?.issues?.length) p1.push(...infoScan.issues.map(s => '核对信息：' + s));
     return { p0, p1, p2 };
-  }, [linkAudit, promoAudit, infoScan, ai]);
+  }, [ai, mechanicalIssues, promoAudit, infoScan]);
 
   return (
     <div className="card html-audit-card">
       <h2>🧪 邮件文件审核</h2>
       <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 12 }}>
-        上传 .eml 或 .html 测试邮件，系统自动检查拼写语法、链接一致性、优惠码/价格/日期，并调用 AI 给出 EDM 优化建议。
+        上传 .eml 或 .html 测试邮件，系统检查产品链接匹配、拼写语法、优惠码/价格/日期，并调用 AI 给出 EDM 优化建议。
       </p>
 
       {/* 上传区域 */}
@@ -355,7 +398,7 @@ export default function HtmlAudit() {
       )}
 
       <div className="html-audit-meta">
-        <input type="text" className="score-input" aria-label="目标主域名" placeholder="目标主域名，如 example.com" value={targetDomain} onChange={e => setTargetDomain(e.target.value)} />
+        <input type="text" className="score-input" aria-label="目标主域名" placeholder="目标主域名（仅参考），如 example.com" value={targetDomain} onChange={e => setTargetDomain(e.target.value)} />
         <input type="text" className="score-input" aria-label="本次优惠码" placeholder="本次优惠码，如 SUMMER20" value={promoCode} onChange={e => setPromoCode(e.target.value)} />
       </div>
 
@@ -376,9 +419,9 @@ export default function HtmlAudit() {
         <button className="btn btn-primary" disabled={loading || !canRun} onClick={handleRun}>
           {loading ? '审核中...' : '🔍 开始审核'}
         </button>
-        {linkAudit && (
+        {items.length > 0 && (
           <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-            已提取 {linkAudit.links.length} 个链接（含图片）{linkAudit.mainDomains.length > 0 ? ` · ${linkAudit.mainDomains.length} 个主域名` : ''}
+            已提取 {items.length} 个链接/图片{mainDomains.length > 0 ? ` · ${mainDomains.length} 个主域名` : ''}
           </span>
         )}
       </div>
@@ -415,6 +458,26 @@ export default function HtmlAudit() {
         </div>
       )}
 
+      {/* 产品链接匹配检查 */}
+      {ai && (
+        <div className="score-section">
+          <h3 className="score-section-title warn">产品链接匹配检查</h3>
+          {ai.productIssues?.length > 0 ? (
+            ai.productIssues.map((p, i) => (
+              <div key={i} className={`product-issue${/人工确认/.test(p.location || '') ? ' product-issue-warn' : ''}`}>
+                <div className="product-issue-row"><strong>📍 位置：</strong>{p.location || '—'}</div>
+                <div className="product-issue-row"><strong>🔍 显示：</strong>{p.display || '—'}</div>
+                <div className="product-issue-row"><strong>🎯 当前指向：</strong>{p.target || '—'}</div>
+                <div className="product-issue-row"><strong>⚠️ 风险：</strong>{p.risk || '—'}</div>
+                <div className="product-issue-row"><strong>✅ 建议：</strong>{p.suggestion || '—'}</div>
+              </div>
+            ))
+          ) : (
+            <div style={{ fontSize: 12, color: '#059669' }}>✅ 未发现产品链接跳转/不匹配问题</div>
+          )}
+        </div>
+      )}
+
       {/* 高风险问题 */}
       {highRisk.length > 0 && (
         <div className="score-section">
@@ -423,34 +486,38 @@ export default function HtmlAudit() {
         </div>
       )}
 
-      {/* 链接一致性检查 */}
-      {linkAudit && (
+      {/* 链接分类 */}
+      {items.length > 0 && (
         <div className="score-section">
-          <h3 className="score-section-title">链接一致性检查</h3>
-          {linkAudit.mainDomains.length > 0 && (
-            <div style={{ fontSize: 12, color: linkAudit.mainDomains.length > 1 ? '#dc2626' : '#059669', marginBottom: 8 }}>
-              {linkAudit.mainDomains.length > 1
-                ? `⚠️ 出现 ${linkAudit.mainDomains.length} 个不同主域名：${linkAudit.mainDomains.join('、')}`
-                : `✅ 主域名统一：${linkAudit.mainDomains[0]}`}
-            </div>
-          )}
-          {linkAudit.links.length > 0 && (
-            <table className="link-list">
-              <thead>
-                <tr><th style={{ width: 90 }}>状态</th><th style={{ width: 52 }}>类型</th><th style={{ width: 160 }}>主域名</th><th>链接</th></tr>
-              </thead>
-              <tbody>
-                {linkAudit.links.map((l, i) => (
-                  <tr key={i}>
-                    <td><span className={`link-badge link-${l.status}`}>{l.label}</span></td>
-                    <td style={{ color: 'var(--text-muted)' }}>{l.type === 'image' ? '图片' : '链接'}</td>
-                    <td style={{ color: 'var(--text-secondary)' }}>{l.mainDomain || '—'}</td>
-                    <td className="link-href">{l.href}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+          <h3 className="score-section-title">链接分类</h3>
+          <table className="link-list">
+            <thead>
+              <tr><th style={{ width: 34 }}>#</th><th style={{ width: 110 }}>分类</th><th style={{ width: 90 }}>状态</th><th>链接 / 文本</th></tr>
+            </thead>
+            <tbody>
+              {items.map((it, i) => (
+                <tr key={i}>
+                  <td style={{ color: 'var(--text-muted)' }}>{i + 1}</td>
+                  <td><span className="cat-badge" style={{ color: CAT_COLORS[it.category] || '#64748b' }}>{it.category}</span></td>
+                  <td>{it.kind === 'link' && it.mech.status !== 'ok' ? <span className={`link-badge link-${it.mech.status}`}>{it.mech.label}</span> : <span className="link-badge link-ok">—</span>}</td>
+                  <td>
+                    <div style={{ color: 'var(--text)' }}>{it.text || <span style={{ color: 'var(--text-muted)' }}>(无文本)</span>}</div>
+                    <div className="link-href">{it.url}</div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* 主域名参考 */}
+      {mainDomains.length > 0 && (
+        <div className="score-section">
+          <h3 className="score-section-title">主域名参考（不参与扣分）</h3>
+          <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.7 }}>
+            {mainDomains.map(d => <span key={d} className="cat-badge" style={{ marginRight: 6, color: '#64748b' }}>{d}</span>)}
+          </div>
         </div>
       )}
 
