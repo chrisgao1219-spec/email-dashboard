@@ -1,7 +1,7 @@
 import { useState, useMemo, useRef } from 'react';
 import { fetchHtmlAudit } from '../api';
 
-// 疑似测试/占位链接的特征（用于机械检查，不涉及主域名）
+// 疑似测试/占位链接的特征（机械检查，不涉及主域名）
 const TEST_LINK_PATTERNS = [
   'test', 'example', 'localhost', '127.0.0.1', 'placehold', 'sample',
   'demo', 'staging', 'dev.', 'yourdomain', 'mysite', 'xxx', 'preview',
@@ -13,16 +13,20 @@ const VARIABLE_LINK_RE = /\{\{|\}\}|\{link\}|\{url\}|\{tracking\}|\{cta\}|%%[a-z
 
 // 常见社媒域名
 const SOCIAL_DOMAINS = ['facebook.com', 'fb.com', 'instagram.com', 'twitter.com', 'x.com', 'tiktok.com', 'youtube.com', 'youtu.be', 'linkedin.com', 'pinterest.com', 'snapchat.com', 'weibo.com', 'reddit.com', 'threads.net'];
-// 追踪链接特征
-const TRACKING_HINTS = ['track', 'click', 'redirect', 'utm_', 'mailer', 'sendgrid', 'mailchimp', 'klaviyo', 'omnisend', 'litmus', 'mandrill', 'mkt', 'esp.', 'em.', '/l/', '/r/'];
+
+// 按钮 CTA 关键词
+const CTA_KEYWORDS = ['buy now', 'shop now', 'learn more', 'claim', 'view deal', 'get yours', 'order now', 'shop', 'buy', 'get the deal', 'explore', 'discover', 'grab', '立即购买', '立即抢购', '了解更多', '查看详情', '马上抢', '立即下单', '现在购买', '购买', '抢购'];
+
+// 追踪链接里常见的「真实目标」参数名
+const TRACKING_PARAM_NAMES = ['url', 'u', 'target', 'redirect', 'destination', 'link', 'next', 'goto', 'redir', 'rurl', 'dest', 'redirect_url', 'return'];
 
 // 常见的两段式二级域名（用于正确取主域名）
 const TWO_PART_TLDS = ['co.uk', 'com.au', 'com.cn', 'co.jp', 'com.br', 'co.nz', 'co.in', 'com.sg', 'com.hk', 'com.mx', 'co.kr'];
 
-const CAT_COLORS = {
-  '产品链接': '#059669', '活动页/集合页': '#2563eb', '社媒': '#7c3aed',
-  '退订': '#64748b', '隐私/条款': '#64748b', '查看网页版': '#64748b',
-  '图片资源': '#d97706', '追踪链接': '#db2777', '其他链接': '#64748b',
+const TYPE_COLORS = {
+  '图片': '#d97706', '按钮': '#2563eb', '文字': '#059669',
+  '社媒': '#7c3aed', '退订': '#64748b', '隐私政策': '#64748b',
+  '查看网页版': '#64748b', '其他': '#64748b', '图片资源': '#d97706',
 };
 
 // 归一化目标域名 → hostname（去掉协议、www、路径）
@@ -69,25 +73,70 @@ function classifyMechanical(url) {
   return { status: 'ok', label: '正常' };
 }
 
-// 链接分类（粗分类，供展示；产品匹配的精细判断交给 AI）
-function classifyCategory(kind, url, text, hostname) {
-  if (kind === 'image') return '图片资源';
-  const h = (hostname || '').toLowerCase();
-  const t = (text || '').toLowerCase();
-  let path = '';
-  try { path = new URL(url.startsWith('//') ? 'http:' + url : url).pathname.toLowerCase(); } catch {}
-  const combo = t + ' ' + path;
-  if (SOCIAL_DOMAINS.some(d => h === d || h.endsWith('.' + d))) return '社媒';
-  if (/unsubscribe|退订|opt-?out|unsub/i.test(combo)) return '退订';
-  if (/privacy|terms|隐私|条款|policy|legal/i.test(combo)) return '隐私/条款';
-  if (/view in browser|viewonline|网页版|web version|view-online/i.test(combo)) return '查看网页版';
-  if (TRACKING_HINTS.some(k => h.includes(k) || url.toLowerCase().includes(k))) return '追踪链接';
-  if (/\/products?\/|\/dp\/|\/product-|\/item\//i.test(path)) return '产品链接';
-  if (/\/collections?\/|\/category\/|\/pages\/|\/campaign|\/sale|\/promo|\/shop\b/i.test(path)) return '活动页/集合页';
-  return '其他链接';
+function isCtaText(t) {
+  return CTA_KEYWORDS.some(k => t.includes(k));
 }
 
-// 用 DOMParser 提取所有 <a> 和 <img>（保持文档顺序 + 锚文本/alt）
+// 判断单个 <a> 的链接类型（社媒/退订/隐私/网页版 优先，其次图片/按钮/文字/其他）
+function detectLinkType(a, href, hostname, path) {
+  const h = (hostname || '').toLowerCase();
+  const anchorText = (a.textContent || '').trim().replace(/\s+/g, ' ').toLowerCase();
+  const combo = anchorText + ' ' + path;
+  const hasImg = !!a.querySelector('img');
+  const hasTable = !!a.querySelector('table, td');
+
+  if (SOCIAL_DOMAINS.some(d => h === d || h.endsWith('.' + d))) return '社媒';
+  if (/unsubscribe|退订|opt-?out|unsub/i.test(combo)) return '退订';
+  if (/privacy|terms|隐私|条款|policy|legal/i.test(combo)) return '隐私政策';
+  if (/view in browser|viewonline|网页版|web version/i.test(combo)) return '查看网页版';
+  if (hasImg) return '图片';
+  if (hasTable || isCtaText(anchorText)) return '按钮';
+  if (anchorText) return '文字';
+  return '其他';
+}
+
+// 向上找最近的「块级」祖先文本，作为产品模块上下文
+function getParentContextText(a) {
+  let node = a.parentElement;
+  let depth = 0;
+  const selfText = (a.textContent || '').trim().replace(/\s+/g, ' ');
+  while (node && depth < 6) {
+    if (['TD', 'DIV', 'TR', 'TABLE', 'SECTION', 'ARTICLE', 'P', 'LI', 'H1', 'H2', 'H3'].includes(node.tagName)) {
+      const t = (node.textContent || '').trim().replace(/\s+/g, ' ');
+      if (t.length >= 10 && t !== selfText) return t.slice(0, 200);
+    }
+    node = node.parentElement;
+    depth++;
+  }
+  return '';
+}
+
+function extractPrice(text) {
+  const m = (text || '').match(/[$€£￥¥]\s*\d+(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?\s*(?:USD|EUR|GBP|CNY)/i);
+  return m ? m[0].replace(/\s+/g, '') : '';
+}
+
+// 从追踪链接里解析真实目标（url/u/target/redirect/destination/link 等参数）
+function resolveFinalTarget(href) {
+  if (!href) return '';
+  try {
+    const u = new URL(href.startsWith('//') ? 'http:' + href : href);
+    for (const name of TRACKING_PARAM_NAMES) {
+      const v = u.searchParams.get(name);
+      if (v) {
+        try {
+          const decoded = decodeURIComponent(v);
+          if (/^https?:\/\//i.test(decoded)) return decoded;
+        } catch {}
+      }
+    }
+    return '';
+  } catch {
+    return '';
+  }
+}
+
+// 用 DOMParser 提取所有 <a>（含图片/按钮/文字/追踪）和独立 <img>
 function extractItems(html) {
   let doc;
   try {
@@ -96,17 +145,43 @@ function extractItems(html) {
     return [];
   }
   const items = [];
-  doc.querySelectorAll('a, img').forEach(el => {
-    const kind = el.tagName === 'IMG' ? 'image' : 'link';
-    const url = kind === 'image' ? (el.getAttribute('src') || '') : (el.getAttribute('href') || '');
-    let text = (el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 80);
-    if (kind === 'link' && !text) {
-      const img = el.querySelector('img');
-      text = (img?.getAttribute('alt') || '').slice(0, 80);
-    }
-    if (kind === 'image') text = (el.getAttribute('alt') || '').slice(0, 80);
-    items.push({ kind, url, text });
+
+  // 1) 所有 <a> 链接（EDM 按钮/图片/文字都是 <a> 包裹）
+  doc.querySelectorAll('a').forEach(a => {
+    const href = a.getAttribute('href') || '';
+    const anchorText = (a.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 120);
+    const img = a.querySelector('img');
+    const imgSrc = img?.getAttribute('src') || '';
+    const imgAlt = img?.getAttribute('alt') || '';
+    const imgTitle = img?.getAttribute('title') || '';
+    const hostname = getHostname(href) || '';
+    let path = '';
+    try { path = new URL(href.startsWith('//') ? 'http:' + href : href).pathname.toLowerCase(); } catch {}
+    const type = detectLinkType(a, href, hostname, path);
+    const parentText = getParentContextText(a);
+    items.push({
+      kind: 'link', type, href, anchorText, imgSrc, imgAlt, imgTitle, parentText,
+      nearbyPrice: extractPrice(parentText),
+      finalTarget: resolveFinalTarget(href),
+      hostname, mainDomain: hostname ? getMainDomain(hostname) : '',
+      mech: classifyMechanical(href),
+    });
   });
+
+  // 2) 独立 <img>（不在 <a> 内，纯图片资源）
+  doc.querySelectorAll('img').forEach(img => {
+    if (img.closest('a')) return;
+    const src = img.getAttribute('src') || '';
+    const alt = img.getAttribute('alt') || '';
+    const hostname = getHostname(src) || '';
+    items.push({
+      kind: 'image', type: '图片资源', href: src, anchorText: alt, imgSrc: src, imgAlt: alt,
+      imgTitle: img.getAttribute('title') || '', parentText: '', nearbyPrice: '', finalTarget: '',
+      hostname, mainDomain: hostname ? getMainDomain(hostname) : '',
+      mech: { status: 'ok', label: '图片' },
+    });
+  });
+
   return items;
 }
 
@@ -157,14 +232,39 @@ function scanInfoConsistency(html) {
   return { issues, pcts: [...pcts], dates: [...dates] };
 }
 
-// ── .eml 解析 ──
+// ── .eml 解析（递归处理嵌套 multipart）──
+function parseHeaders(headerText) {
+  const headers = {};
+  let lastName = null;
+  headerText.split('\n').forEach(line => {
+    if (/^[ \t]/.test(line) && lastName) { headers[lastName] += ' ' + line.trim(); return; }
+    const idx = line.indexOf(':');
+    if (idx > 0) { lastName = line.slice(0, idx).trim().toLowerCase(); headers[lastName] = line.slice(idx + 1).trim(); }
+  });
+  return headers;
+}
+
+function getCharset(contentType) {
+  const m = (contentType || '').match(/charset=["']?([^;"'\s]+)/i);
+  return m ? m[1].toLowerCase() : 'utf-8';
+}
+
+function decodeBytes(bytes, charset) {
+  try {
+    return new TextDecoder(charset).decode(Uint8Array.from(bytes));
+  } catch {
+    try { return new TextDecoder('utf-8').decode(Uint8Array.from(bytes)); }
+    catch { return String.fromCharCode.apply(null, bytes); }
+  }
+}
+
 function decodeMimeWord(s) {
   if (!s) return '';
-  return s.replace(/=\?([^?]+)\?([bBqQ])\?([^?]*)\?=/g, (_m, _charset, enc, data) => {
+  return s.replace(/=\?([^?]+)\?([bBqQ])\?([^?]*)\?=/g, (_m, charset, enc, data) => {
     try {
       if (enc.toLowerCase() === 'b') {
         const bin = atob(data.replace(/\s+/g, ''));
-        return new TextDecoder('utf-8').decode(Uint8Array.from(bin, c => c.charCodeAt(0)));
+        return decodeBytes(Uint8Array.from(bin, c => c.charCodeAt(0)), charset || 'utf-8');
       }
       return data.replace(/_/g, ' ').replace(/=([0-9A-Fa-f]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
     } catch {
@@ -173,17 +273,68 @@ function decodeMimeWord(s) {
   });
 }
 
-function decodeBase64(s) {
+function decodeBase64(s, charset = 'utf-8') {
   try {
     const bin = atob(s.replace(/\s+/g, ''));
-    return new TextDecoder('utf-8').decode(Uint8Array.from(bin, c => c.charCodeAt(0)));
+    return decodeBytes(Uint8Array.from(bin, c => c.charCodeAt(0)), charset);
   } catch {
     return s;
   }
 }
 
-function decodeQuotedPrintable(s) {
-  return s.replace(/=\r?\n/g, '').replace(/=([0-9A-Fa-f]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+function decodeQuotedPrintable(s, charset = 'utf-8') {
+  const noSoft = s.replace(/=\r?\n/g, '');
+  const bytes = [];
+  for (let i = 0; i < noSoft.length; i++) {
+    if (noSoft[i] === '=' && i + 2 < noSoft.length && /^[0-9A-Fa-f]{2}$/.test(noSoft.slice(i + 1, i + 3))) {
+      bytes.push(parseInt(noSoft.slice(i + 1, i + 3), 16));
+      i += 2;
+    } else {
+      bytes.push(noSoft.charCodeAt(i));
+    }
+  }
+  return decodeBytes(bytes, charset);
+}
+
+function decodeByEncoding(content, enc, charset) {
+  if (enc.includes('base64')) return decodeBase64(content, charset);
+  if (enc.includes('quoted-printable')) return decodeQuotedPrintable(content, charset);
+  return content;
+}
+
+function walkMime(body, contentType, transferEncoding, out) {
+  const ct = contentType || '';
+  const enc = (transferEncoding || '').toLowerCase();
+  const boundaryMatch = ct.match(/boundary=["']?([^;"']+)/i);
+  const boundary = boundaryMatch ? boundaryMatch[1] : null;
+
+  if (boundary) {
+    const delim = '--' + boundary;
+    const parts = body.split(delim);
+    for (const part of parts) {
+      const t = part.trim();
+      if (!t || t === '--') continue; // 空段或结束分隔符
+      const partHeaderEnd = part.search(/\n\n/);
+      if (partHeaderEnd < 0) continue;
+      const partHeader = part.slice(0, partHeaderEnd);
+      const partBody = part.slice(partHeaderEnd + 2);
+      const ph = parseHeaders(partHeader);
+      walkMime(partBody, ph['content-type'] || '', ph['content-transfer-encoding'] || '', out);
+    }
+    return;
+  }
+
+  // 叶子 part
+  const charset = getCharset(ct);
+  const decoded = decodeByEncoding(body.replace(/^\n/, ''), enc, charset);
+  if (/text\/html/i.test(ct)) {
+    if (!out.htmlBody) out.htmlBody = decoded;
+  } else if (/text\/plain/i.test(ct)) {
+    if (!out.plainBody) out.plainBody = decoded;
+  } else if (!ct) {
+    if (/<[a-z][^>]*>/i.test(decoded)) { if (!out.htmlBody) out.htmlBody = decoded; }
+    else { if (!out.plainBody) out.plainBody = decoded; }
+  }
 }
 
 function parseEml(raw) {
@@ -192,52 +343,16 @@ function parseEml(raw) {
   const headerText = headerEnd >= 0 ? text.slice(0, headerEnd) : text;
   const bodyText = headerEnd >= 0 ? text.slice(headerEnd + 2) : '';
 
-  const headers = {};
-  let lastName = null;
-  headerText.split('\n').forEach(line => {
-    if (/^[ \t]/.test(line) && lastName) { headers[lastName] += ' ' + line.trim(); return; }
-    const idx = line.indexOf(':');
-    if (idx > 0) { lastName = line.slice(0, idx).trim().toLowerCase(); headers[lastName] = line.slice(idx + 1).trim(); }
-  });
+  const headers = parseHeaders(headerText);
+  const out = { htmlBody: '', plainBody: '' };
+  walkMime(bodyText, headers['content-type'] || '', headers['content-transfer-encoding'] || '', out);
 
-  const contentType = headers['content-type'] || '';
-  const transferEncoding = (headers['content-transfer-encoding'] || '').toLowerCase();
-  const boundaryMatch = contentType.match(/boundary=["']?([^;"']+)/i);
-  const boundary = boundaryMatch ? boundaryMatch[1] : null;
-
-  const decodeByEncoding = (content, enc) => {
-    if (enc.includes('base64')) return decodeBase64(content);
-    if (enc.includes('quoted-printable')) return decodeQuotedPrintable(content);
-    return content;
+  return {
+    subject: decodeMimeWord(headers['subject'] || ''),
+    from: decodeMimeWord(headers['from'] || ''),
+    htmlBody: out.htmlBody,
+    plainBody: out.plainBody,
   };
-
-  let htmlBody = '';
-  let plainBody = '';
-
-  if (boundary) {
-    const segments = bodyText.split('--' + boundary);
-    for (const seg of segments) {
-      const trimmed = seg.trim();
-      if (!trimmed || trimmed === '--') continue;
-      const partHeaderEnd = seg.search(/\n\n/);
-      if (partHeaderEnd < 0) continue;
-      const partHeader = seg.slice(0, partHeaderEnd);
-      const partBody = seg.slice(partHeaderEnd + 2);
-      const partContentType = (partHeader.match(/content-type:\s*([^\n]+)/i) || [])[1] || '';
-      const partEncoding = ((partHeader.match(/content-transfer-encoding:\s*([^\n]+)/i) || [])[1] || '').toLowerCase();
-      const content = decodeByEncoding(partBody.replace(/^\n/, ''), partEncoding);
-      if (/text\/html/i.test(partContentType) && !htmlBody) htmlBody = content;
-      else if (/text\/plain/i.test(partContentType) && !plainBody) plainBody = content;
-    }
-  } else {
-    const content = decodeByEncoding(bodyText.replace(/^\n/, ''), transferEncoding);
-    if (/text\/html/i.test(contentType)) htmlBody = content;
-    else if (/text\/plain/i.test(contentType)) plainBody = content;
-    else if (/<[a-z][^>]*>/i.test(content)) htmlBody = content;
-    else plainBody = content;
-  }
-
-  return { subject: decodeMimeWord(headers['subject'] || ''), from: decodeMimeWord(headers['from'] || ''), htmlBody, plainBody };
 }
 
 export default function HtmlAudit() {
@@ -252,19 +367,26 @@ export default function HtmlAudit() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [dragOver, setDragOver] = useState(false);
+  const [debug, setDebug] = useState(null);
   const fileInputRef = useRef(null);
 
-  // 结构化提取 + 机械检查 + 粗分类
-  const items = useMemo(() => {
-    if (!html.trim()) return [];
-    return extractItems(html).map(it => {
-      const mech = it.kind === 'link' ? classifyMechanical(it.url) : { status: 'ok', label: '图片' };
-      const hostname = getHostname(it.url) || '';
-      const mainDomain = hostname ? getMainDomain(hostname) : '';
-      const category = classifyCategory(it.kind, it.url, it.text, hostname);
-      return { ...it, mech, hostname, mainDomain, category };
-    });
-  }, [html]);
+  const items = useMemo(() => html.trim() ? extractItems(html) : [], [html]);
+
+  const linkCounts = useMemo(() => {
+    const links = items.filter(it => it.kind === 'link');
+    const count = (t) => links.filter(l => l.type === t).length;
+    return {
+      total: links.length,
+      image: count('图片'),
+      button: count('按钮'),
+      text: count('文字'),
+      social: count('社媒'),
+      unsub: count('退订'),
+      privacy: count('隐私政策'),
+      browser: count('查看网页版'),
+      other: count('其他'),
+    };
+  }, [items]);
 
   const mainDomains = useMemo(() => [...new Set(items.map(it => it.mainDomain).filter(Boolean))], [items]);
 
@@ -287,9 +409,15 @@ export default function HtmlAudit() {
   const itemsSummary = useMemo(() => {
     if (!items.length) return '';
     return items.map((it, i) => {
-      const flag = it.kind === 'link' && it.mech.status !== 'ok' ? `  ⚠️${it.mech.label}` : '';
-      const prefix = it.kind === 'image' ? `图片 alt="${it.text}"` : `链接 "${it.text}"`;
-      return `[${i + 1}] ${prefix} → ${it.url}${flag}`;
+      if (it.kind === 'image') return `[${i + 1}] 图片资源 alt="${it.anchorText || ''}" → ${it.href}`;
+      const parts = [`${it.type}链接`];
+      if (it.anchorText) parts.push(`文本:"${it.anchorText}"`);
+      if (it.imgAlt) parts.push(`图片alt:"${it.imgAlt}"`);
+      if (it.parentText) parts.push(`附近文本:"${it.parentText.slice(0, 80)}"`);
+      if (it.mech.status !== 'ok') parts.push(`⚠️${it.mech.label}`);
+      parts.push(`href=${it.href}`);
+      if (it.finalTarget && it.finalTarget !== it.href) parts.push(`最终目标=${it.finalTarget}`);
+      return `[${i + 1}] ${parts.join(' | ')}`;
     }).join('\n');
   }, [items]);
 
@@ -304,16 +432,22 @@ export default function HtmlAudit() {
       const text = await file.text();
       if (lower.endsWith('.html') || lower.endsWith('.htm')) {
         setHtml(text); setSubject(''); setFrom(''); setPlainText('');
+        setDebug({ htmlFound: true, htmlChars: text.length, isEml: false });
       } else if (lower.endsWith('.eml')) {
         const eml = parseEml(text);
         setSubject(eml.subject || ''); setFrom(eml.from || '');
-        setPlainText(eml.plainBody || ''); setHtml(eml.htmlBody || eml.plainBody || '');
+        setPlainText(eml.plainBody || '');
+        setHtml(eml.htmlBody || eml.plainBody || '');
+        setDebug({ htmlFound: !!(eml.htmlBody && eml.htmlBody.trim()), htmlChars: (eml.htmlBody || '').length, isEml: true });
       } else if (/<[a-z][^>]*>/i.test(text)) {
         setHtml(text); setSubject(''); setFrom(''); setPlainText('');
+        setDebug({ htmlFound: true, htmlChars: text.length, isEml: false });
       } else {
         const eml = parseEml(text);
         setSubject(eml.subject || ''); setFrom(eml.from || '');
-        setPlainText(eml.plainBody || ''); setHtml(eml.htmlBody || eml.plainBody || text);
+        setPlainText(eml.plainBody || '');
+        setHtml(eml.htmlBody || eml.plainBody || text);
+        setDebug({ htmlFound: !!(eml.htmlBody && eml.htmlBody.trim()), htmlChars: (eml.htmlBody || '').length, isEml: true });
       }
       setFileName(name);
     } catch (e) {
@@ -397,6 +531,16 @@ export default function HtmlAudit() {
         </div>
       )}
 
+      {/* 调试信息 */}
+      {debug && (
+        <div style={{ marginBottom: 12, padding: '10px 14px', background: '#f8fafc', border: '1px solid var(--border-light)', borderRadius: 8, fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.8 }}>
+          <strong style={{ color: 'var(--text)' }}>🔎 解析信息</strong>
+          <div>HTML 解析：{debug.htmlFound ? '✅ 成功' : '⚠️ 未找到 text/html（可能只有纯文本）'}</div>
+          <div>HTML 字符数：{debug.htmlChars.toLocaleString()}</div>
+          <div>&lt;a href&gt; 链接数：<strong>{linkCounts.total}</strong>（图片 {linkCounts.image} · 按钮 {linkCounts.button} · 文字 {linkCounts.text} · 社媒 {linkCounts.social} · 退订 {linkCounts.unsub} · 隐私 {linkCounts.privacy} · 网页版 {linkCounts.browser} · 其他 {linkCounts.other}）</div>
+        </div>
+      )}
+
       <div className="html-audit-meta">
         <input type="text" className="score-input" aria-label="目标主域名" placeholder="目标主域名（仅参考），如 example.com" value={targetDomain} onChange={e => setTargetDomain(e.target.value)} />
         <input type="text" className="score-input" aria-label="本次优惠码" placeholder="本次优惠码，如 SUMMER20" value={promoCode} onChange={e => setPromoCode(e.target.value)} />
@@ -409,7 +553,7 @@ export default function HtmlAudit() {
           aria-label="EDM HTML"
           placeholder="在此粘贴完整 EDM HTML 源码..."
           value={html}
-          onChange={e => { setHtml(e.target.value); setSubject(''); setFrom(''); setPlainText(''); }}
+          onChange={e => { setHtml(e.target.value); setSubject(''); setFrom(''); setPlainText(''); setDebug(null); }}
           rows={5}
           style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', fontSize: 12, marginTop: 8 }}
         />
@@ -489,20 +633,26 @@ export default function HtmlAudit() {
       {/* 链接分类 */}
       {items.length > 0 && (
         <div className="score-section">
-          <h3 className="score-section-title">链接分类</h3>
+          <h3 className="score-section-title">链接分类（{linkCounts.total} 个链接）</h3>
           <table className="link-list">
             <thead>
-              <tr><th style={{ width: 34 }}>#</th><th style={{ width: 110 }}>分类</th><th style={{ width: 90 }}>状态</th><th>链接 / 文本</th></tr>
+              <tr><th style={{ width: 34 }}>#</th><th style={{ width: 92 }}>类型</th><th style={{ width: 84 }}>状态</th><th>内容 / 链接</th></tr>
             </thead>
             <tbody>
               {items.map((it, i) => (
                 <tr key={i}>
                   <td style={{ color: 'var(--text-muted)' }}>{i + 1}</td>
-                  <td><span className="cat-badge" style={{ color: CAT_COLORS[it.category] || '#64748b' }}>{it.category}</span></td>
+                  <td><span className="cat-badge" style={{ color: TYPE_COLORS[it.type] || '#64748b' }}>{it.type}</span></td>
                   <td>{it.kind === 'link' && it.mech.status !== 'ok' ? <span className={`link-badge link-${it.mech.status}`}>{it.mech.label}</span> : <span className="link-badge link-ok">—</span>}</td>
                   <td>
-                    <div style={{ color: 'var(--text)' }}>{it.text || <span style={{ color: 'var(--text-muted)' }}>(无文本)</span>}</div>
-                    <div className="link-href">{it.url}</div>
+                    <div style={{ color: 'var(--text)' }}>
+                      {it.anchorText || it.imgAlt || <span style={{ color: 'var(--text-muted)' }}>(无文本)</span>}
+                      {it.nearbyPrice ? <span style={{ color: 'var(--text-muted)' }}> · {it.nearbyPrice}</span> : null}
+                    </div>
+                    <div className="link-href">{it.href}</div>
+                    {it.finalTarget && it.finalTarget !== it.href && (
+                      <div className="link-href" style={{ color: '#059669' }}>→ 最终目标：{it.finalTarget}</div>
+                    )}
                   </td>
                 </tr>
               ))}

@@ -229,7 +229,7 @@ export async function handleHtmlAudit(html, targetDomain, promoCode, itemsSummar
 目标主域名（仅参考，不作为扣分项）：${targetDomain || '(未填写)'}
 本次优惠码：${promoCode || '(未指定)'}
 
-【邮件内的链接和图片清单（按出现顺序编号）】
+【邮件内的链接和图片清单（按出现顺序编号）。每条格式：类型 | 文本 | 图片alt | 附近文本(产品名/价格) | href | 最终目标。追踪链接请优先用"最终目标"判断真实产品，主域名是 Mamba 或追踪域名时不要据此判错。】
 ${itemsSummary || '(无)'}
 
 【邮件可见正文（截取前 2500 字）】
