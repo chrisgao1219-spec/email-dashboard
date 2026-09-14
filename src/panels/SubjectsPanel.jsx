@@ -1,11 +1,25 @@
 import useApi from '../hooks/useApi';
-import { fetchTopSubjects } from '../api';
+import { fetchTopSubjects, fetchEmailContent } from '../api';
 import ScoreBadge from '../components/ScoreBadge';
 import ToneTag from '../components/ToneTag';
 import { SkeletonTable } from '../components/SkeletonLoader';
 
 export default function SubjectsPanel() {
   const { data, loading, error } = useApi('subjects', fetchTopSubjects);
+
+  const viewEmail = async (driveUrl) => {
+    try {
+      const r = await fetchEmailContent(driveUrl);
+      if (r && r.ok && r.html) {
+        const blob = new Blob([r.html], { type: 'text/html' });
+        window.open(URL.createObjectURL(blob), '_blank');
+      } else {
+        alert('无法加载邮件内容：' + ((r && r.error) || '未知错误'));
+      }
+    } catch (e) {
+      alert('加载失败：' + e.message);
+    }
+  };
 
   if (loading) return <div className="panel active"><SkeletonTable rows={8} /></div>;
   if (error) return <div className="panel active"><div className="empty"><span className="empty-icon">⚠️</span><div className="empty-title">加载失败</div><div className="empty-desc">{error}</div></div></div>;
@@ -25,6 +39,7 @@ export default function SubjectsPanel() {
                 <th>评分</th>
                 <th>语调</th>
                 <th>框架</th>
+                <th>原文</th>
               </tr>
             </thead>
             <tbody>
@@ -36,6 +51,7 @@ export default function SubjectsPanel() {
                   <td><ScoreBadge score={s.score} grade={s.grade} /></td>
                   <td><ToneTag tone={s.tone} /></td>
                   <td><span className="fw-badge">{s.framework}</span></td>
+                  <td>{s.driveUrl ? <button className="btn btn-sm btn-outline" onClick={() => viewEmail(s.driveUrl)}>查看原文 ↗</button> : '—'}</td>
                 </tr>
               ))}
             </tbody>

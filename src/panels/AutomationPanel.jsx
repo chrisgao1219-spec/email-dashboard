@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { SEQUENCES, TEMPLATE_TYPES, MY_EMAIL_REFERENCES } from './SequencePanel';
-import { fetchCompetitorEmail } from '../api';
+import { fetchCompetitorEmail, fetchEmailContent } from '../api';
 import EmailReferences from '../components/EmailReferences';
 
 const QUICK_GUIDE = [
@@ -51,6 +51,21 @@ export default function AutomationPanel({ initialExpand }) {
       setTemplateError(s => ({ ...s, [seqId]: e.message || '加载失败' }));
     }
     setTemplateLoading(s => ({ ...s, [seqId]: false }));
+  };
+
+  // 查看完整邮件原文：走鉴权接口取 HTML，浏览器本地新标签打开（不公开分享 Drive）
+  const viewEmail = async (driveUrl) => {
+    try {
+      const r = await fetchEmailContent(driveUrl);
+      if (r && r.ok && r.html) {
+        const blob = new Blob([r.html], { type: 'text/html' });
+        window.open(URL.createObjectURL(blob), '_blank');
+      } else {
+        alert('无法加载邮件内容：' + ((r && r.error) || '未知错误'));
+      }
+    } catch (e) {
+      alert('加载失败：' + e.message);
+    }
   };
 
   return (
@@ -145,6 +160,11 @@ export default function AutomationPanel({ initialExpand }) {
                       )}
                       {templateData[seq.id].bodyPreview && (
                         <div className="seq-template-body">{templateData[seq.id].bodyPreview}</div>
+                      )}
+                      {templateData[seq.id].driveUrl && (
+                        <button className="btn btn-sm btn-outline" style={{ marginTop: 8 }} onClick={() => viewEmail(templateData[seq.id].driveUrl)}>
+                          📄 查看完整邮件原文 →
+                        </button>
                       )}
                     </div>
                   ) : templateError[seq.id] ? (
