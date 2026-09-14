@@ -44,6 +44,7 @@ export function fetchBundle(brand)           { return get('bundle', brand ? { br
 export function fetchConfig()              { return get('config'); }
 export function fetchStats()               { return get('stats'); }
 export function fetchDashboard()           { return get('dashboard'); }
+export function fetchAnalysis(brand)       { return get('analysis', brand ? { brand } : {}); }
 export function fetchTopSubjects()         { return get('subjects'); }
 export function fetchActionReport(brand)   { return get('action', brand ? { brand } : {}); }
 export function fetchWeeklyReport()        { return get('weekly'); }

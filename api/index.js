@@ -1,5 +1,5 @@
 const WRITE_ENDPOINTS = new Set(['runFull', 'runQuick', 'dedup', 'setAiKey', 'register', 'remove', 'setupTrigger', 'score', 'rewrite', 'template', 'shopifyConnect']);
-const READ_ENDPOINTS = new Set(['config', 'stats', 'dashboard', 'subjects', 'action', 'weekly', 'compare', 'inspire', 'copy', 'templates', 'bundle', 'aiStatus', 'aiIdeas', 'strategy', 'calendar', 'digest', 'sheetUrl', 'registered', 'shopifyData', 'competitorEmail']);
+const READ_ENDPOINTS = new Set(['config', 'stats', 'dashboard', 'subjects', 'action', 'weekly', 'compare', 'inspire', 'copy', 'templates', 'bundle', 'aiStatus', 'aiIdeas', 'strategy', 'calendar', 'digest', 'sheetUrl', 'registered', 'shopifyData', 'competitorEmail', 'diag', 'analysis']);
 const ALL_ENDPOINTS = new Set([...WRITE_ENDPOINTS, ...READ_ENDPOINTS]);
 const STRATEGY_ENDPOINTS = new Set(['strategyGenerate', 'strategyBrands', 'strategyScenarios', 'strategyQuickGenerate']);
 const AI_ENDPOINTS = new Set(['aiIdeas', 'template', 'inspire', 'score', 'rewrite', 'digest', 'customTemplate', 'generateCampaign', 'generateCalendar']);

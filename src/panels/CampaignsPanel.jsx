@@ -1,5 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { MAMBA_SEGMENT_GUIDE, RFM_SEGMENTS, CONTENT_PILLARS } from '../constants/emailPlanning';
+import useApi from '../hooks/useApi';
+import { fetchAnalysis } from '../api';
 import ScorePanel from './ScorePanel';
 import AIWorkshopPanel from './AIWorkshopPanel';
 import { getBrandProfile, TYPE_TO_AUDIENCE_RULE } from '../utils/brandProfiles';
@@ -14,11 +16,46 @@ const INTERNAL_TABS = [
 
 const GEN_STEPS = ['选择品牌', '填写邮件方向', '选择展示产品', '系统推荐人群', '生成提示词'];
 
+// 稳定「全集」：用于识别竞品未覆盖的空白（值域与后端分析器一致）
+const ALL_TONES = ['好奇心驱动', '紧迫催促', '友好亲切', '权威专业', '兴奋激动', '情感关怀'];
+const ALL_CTAS = ['硬性销售', '软性引导', '均衡'];
+const OFFER_CATEGORIES = [
+  { key: '百分比折扣', test: /%/ },
+  { key: '固定金额立减', test: /\$|¥|立减/ },
+  { key: '免运费', test: /免运费|free\s*shipping/i },
+  { key: '买一送一', test: /买一送一|bogo|buy one/i },
+  { key: '赠品', test: /赠品|gift/i },
+];
+function categorizeOffer(o) { for (const c of OFFER_CATEGORIES) if (c.test.test(o)) return c.key; return null; }
+function pct(p, t) { return t > 0 ? Math.round(p / t * 100) : 0; }
+
+function deriveCampaignInsights(analysis) {
+  if (!analysis || analysis.total < 3) return null;
+  const N = analysis.total;
+  const byType = Object.entries(analysis.byType || {}).sort((a, b) => b[1] - a[1]);
+  const byOffer = Object.entries(analysis.byOffer || {}).sort((a, b) => b[1] - a[1]);
+  const byTone = Object.entries(analysis.byTone || {}).sort((a, b) => b[1] - a[1]);
+  const topType = byType[0], topOffer = byOffer[0], topTone = byTone[0];
+  const usedTones = new Set(byTone.map(([k]) => k));
+  const missingTones = ALL_TONES.filter(t => !usedTones.has(t));
+  const usedCtas = new Set(Object.keys(analysis.byCta || {}));
+  const missingCtas = ALL_CTAS.filter(c => !usedCtas.has(c));
+  const usedOfferCats = new Set(byOffer.map(([k]) => categorizeOffer(k)).filter(Boolean));
+  const missingOfferCats = OFFER_CATEGORIES.map(c => c.key).filter(k => !usedOfferCats.has(k));
+  const bestDay = analysis.timing?.bestDay, bestSlot = analysis.timing?.bestSlot;
+  return { N, topType, topOffer, topTone, bestDay, bestSlot, missingTones, missingCtas, missingOfferCats };
+}
+
+const insightHint = { fontSize: 12, fontWeight: 400, color: 'var(--text-muted)', marginLeft: 6 };
+const insightStat = { display: 'flex', flexDirection: 'column', gap: 4, padding: '10px 12px', border: '1px solid var(--border, #e5e7eb)', borderRadius: 8, fontSize: 12, color: 'var(--text-muted)' };
+
 export default function CampaignsPanel({ brand, initialSubTab }) {
   const [subTab, setSubTab] = useState(initialSubTab || 'generator');
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   const brandProfile = useMemo(() => getBrandProfile(brand), [brand]);
+  const { data: analysis } = useApi('analysis', fetchAnalysis);
+  const insights = useMemo(() => deriveCampaignInsights(analysis), [analysis]);
 
   // 表单状态
   const [form, setForm] = useState(DEFAULT_FORM);
@@ -242,6 +279,25 @@ export default function CampaignsPanel({ brand, initialSubTab }) {
       {/* ===== 主流程 ===== */}
       {subTab === 'generator' && (
         <>
+          {/* 竞品数据洞察（基于真实采集的竞品邮件） */}
+          {insights && (
+            <div className="card">
+              <h2>📊 竞品数据洞察 <span style={insightHint}>基于 {insights.N} 封竞品邮件</span></h2>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12, margin: '12px 0' }}>
+                <div style={insightStat}>主力邮件类型<strong>{insights.topType[0]}</strong><span>{pct(insights.topType[1], insights.N)}%</span></div>
+                <div style={insightStat}>最常用优惠<strong>{insights.topOffer ? insights.topOffer[0] : '—'}</strong><span>{insights.topOffer ? insights.topOffer[1] + ' 次' : ''}</span></div>
+                <div style={insightStat}>主导语调<strong>{insights.topTone[0]}</strong><span>{pct(insights.topTone[1], insights.N)}%</span></div>
+                <div style={insightStat}>最活跃时段<strong>{insights.bestDay || '—'} {insights.bestSlot || ''}</strong><span>竞品发送高峰</span></div>
+              </div>
+              <div style={{ background: 'var(--bg-subtle, #f6f7fb)', padding: '12px 14px', borderRadius: 8, fontSize: 14, lineHeight: 1.8, color: 'var(--text-secondary)' }}>
+                <strong style={{ color: 'var(--text-primary)' }}>💡 数据背书的活动建议：</strong>
+                {insights.missingOfferCats.length > 0 && <>竞品主推「{insights.topOffer ? insights.topOffer[0] : '折扣'}」，你可用「{insights.missingOfferCats[0]}」避开比价；</>}
+                {insights.missingTones.length > 0 && <>竞品少用「{insights.missingTones[0]}」语调，可作为你的差异化切入点；</>}
+                {insights.bestDay && <>建议在 {insights.bestDay} {insights.bestSlot} 前后错峰发送。</>}
+              </div>
+            </div>
+          )}
+
           {/* 5 步流程指示 */}
           <div className="gen-steps">
             {GEN_STEPS.map((s, i) => (
