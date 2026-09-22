@@ -100,6 +100,21 @@ export default function OverviewPanel() {
         {data.lastUpdate && <span>最后采集 {data.lastUpdate}</span>}
       </div>
 
+      {/* 类目分布（大类） */}
+      {data.categoryGroups && data.categoryGroups.length > 0 && (
+        <div className="card">
+          <h2>类目分布 <span style={hint}>不分品牌，按类目</span></h2>
+          <div className="gap-tags">
+            {data.categoryGroups.map(g => (
+              <span key={g.group} className="gap-tag" style={{ fontSize: 14, fontWeight: 600 }}>
+                {g.group} · {g.total} 封
+                {Object.entries(g.categories || {}).sort((a, b) => b[1] - a[1]).map(([c, n]) => ` · ${c} ${n}`).join('')}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* 竞争力健康分 */}
       <div className="card health-card">
         <div className="health-main">
